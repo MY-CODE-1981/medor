@@ -1,0 +1,73 @@
+name: medor
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+
+  # === PyTorch stack (CUDA 12.1) ===
+  - pytorch=2.1.2
+  - torchvision=0.16.2
+  - torchaudio=2.1.2
+  - pytorch-cuda=12.1
+
+  # === Scientific computing ===
+  - numpy<2
+  - scipy
+  - pandas
+  - matplotlib
+  - scikit-image
+  - scikit-learn
+  - numba
+  - dask
+
+  # === IO / data ===
+  - h5py
+  - zarr
+  - imageio
+  - pyyaml
+
+  # === Geometry ===
+  - igl
+  - embree
+
+  # === Misc ===
+  - joblib
+  - tqdm
+
+  - pip:
+      # --- PyTorch3D (prebuilt for py3.10 + cu121 + pt2.1.2) ---
+      - pytorch3d==0.7.5
+
+      # --- PyTorch Geometric ---
+      - torch-geometric==2.4.0
+      - torch-scatter
+      - torch-sparse
+      - torch-cluster
+      - torch-spline-conv
+
+      # --- Training / experiment ---
+      - pytorch-lightning>=1.9,<2.0
+      - hydra-core>=1.1
+      - omegaconf>=2.1
+      - wandb
+
+      # --- Geometry / rendering ---
+      - trimesh
+      - open3d
+      - chamferdist
+      - geomloss
+      - kornia
+      - fvcore
+      - iopath
+      - pyopengl
+
+      # --- Visualization / IO ---
+      - opencv-python
+      - plotly
+      - moviepy
+      - einops
+      - pygifsicle
+      - imageio-ffmpeg

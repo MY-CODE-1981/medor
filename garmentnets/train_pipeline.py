@@ -109,7 +109,6 @@ def run_task(args):
     os.makedirs(log_dir, exist_ok=True)
     if rank_zero_only.rank == 0:
         logger = WandbLogger(
-            entity="zixuanh",
             project="Occluded cloth",
             name=exp_name,
             settings=wandb.Settings(start_method='thread'),
@@ -131,16 +130,23 @@ def run_task(args):
         mode='min',
         save_weights_only=False,
         save_on_train_epoch_end=True)
+    # Convert legacy trainer config for PL >= 1.7
+    trainer_kwargs = dict(cfg.trainer)
+    ckpt_path = trainer_kwargs.pop('resume_from_checkpoint', None)
+    if 'gpus' in trainer_kwargs:
+        gpus = trainer_kwargs.pop('gpus')
+        trainer_kwargs['accelerator'] = 'gpu'
+        trainer_kwargs['devices'] = gpus
     trainer = pl.Trainer(
         callbacks=[checkpoint_callback],
-        checkpoint_callback=True,
+        enable_checkpointing=True,
         logger=logger,
-        max_epochs=cfg.get("max_epochs" , 200),
+        max_epochs=cfg.get("max_epochs", 200),
         check_val_every_n_epoch=1,
-        **cfg.trainer
+        **trainer_kwargs
     )
 
-    trainer.fit(model=pipeline_model, datamodule=datamodule)
+    trainer.fit(model=pipeline_model, datamodule=datamodule, ckpt_path=ckpt_path)
 
 
 def main():

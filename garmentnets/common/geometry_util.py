@@ -71,7 +71,7 @@ def faces_to_edges(faces):
             edge_pair = (face[i - 1], face[i])
             edge_pair = tuple(sorted(edge_pair))
             edges_set.add(edge_pair)
-    edges = np.array(list(edges_set), dtype=np.int)
+    edges = np.array(list(edges_set), dtype=np.int64)
     return edges
 
 

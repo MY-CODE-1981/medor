@@ -28,7 +28,12 @@ class IterChamferScipy:
         self.ksize = ksize
 
     def query(self, pred_points):
-        pred_tree = ckdtree.cKDTree(pred_points.detach().cpu().numpy())
+        pred_np = pred_points.detach().cpu().numpy()
+        # Guard against NaN/Inf which would crash cKDTree
+        if np.isnan(pred_np).any() or np.isinf(pred_np).any():
+            print('[WARN] IterChamferScipy.query: pred_points contain NaN/Inf, returning zero loss')
+            return torch.zeros(self.tgt_points.shape[0], device=self.tgt_points.device)
+        pred_tree = ckdtree.cKDTree(pred_np)
         _, forward_nn_idx = pred_tree.query(self.tgt_points_np, k=self.ksize)
         forward_distance = torch.mean((pred_points[forward_nn_idx] - self.tgt_points) ** 2, -1)
 
@@ -98,6 +103,16 @@ class TestTimeFinetuner(object):
 
         if self.cfg.chamfer_mode != 'faiss' and self.chamfer_calculator is None:
             pointcloud.requires_grad = False
+            pc_np = pointcloud.detach().cpu().numpy()
+            if np.isnan(pc_np).any() or np.isinf(pc_np).any():
+                print('[WARN] register_new_state: pointcloud contains NaN/Inf, '
+                      'filtering invalid points')
+                valid = ~(np.isnan(pc_np).any(axis=1) | np.isinf(pc_np).any(axis=1))
+                if valid.sum() > 0:
+                    pointcloud = pointcloud[torch.from_numpy(valid).to(pointcloud.device)]
+                else:
+                    print('[WARN] All pointcloud points are invalid, using origin')
+                    pointcloud = torch.zeros((1, 3), device=pred_pos.device)
             self.chamfer_calculator = IterChamferScipy(pointcloud, 1)
 
     def step(self, opt_iter, optimize=True):

@@ -11,7 +11,7 @@ from joblib import delayed
 from torch_geometric.data import Batch
 from pytorch3d.loss import chamfer_distance
 from garmentnets.common.geometry_util import AABBNormalizer, rotate_particles
-from garmentnets.common.marching_cubes_util import wnf_to_mesh
+from garmentnets.common.marching_cubes_util import wnf_to_mesh, collapse_shell_to_surface
 from garmentnets.components.aggregator import VolumeFeatureAggregator, pointsAggregate
 from garmentnets.components.unet3d import Abstract3DUNet, DoubleConv
 from garmentnets.components.mlp import MLP, MLP2
@@ -30,7 +30,10 @@ from utils.loss_utils import my_huber, chamfer_distance_my, one_way_chamfer_nump
 from visualization.plot import nocs3d_fig, plot_optimization_step_mesh, plot_without_gt2, \
     all_in_one_plot3
 from pytorch_lightning.utilities import rank_zero_only
-from mesh_gnn.rollout import free_drop
+try:
+    from mesh_gnn.rollout import free_drop
+except ImportError:
+    free_drop = None  # softgym/pyflex not available
 
 
 # TODO: UNet 3D
@@ -577,22 +580,44 @@ class ConvImplicitWNFPipeline(pl.LightningModule):
         pred_volume = result_volume
         wnf_volume = to_numpy(pred_volume)
 
+        use_gradient_filter = self.cfg.prediction.get('use_gradient_filter', True)
+        gradient_direction = self.cfg.prediction.get('gradient_direction', 'ascent')
         nocs_verts, faces = wnf_to_mesh(wnf_volume,
                                         iso_surface_level=self.cfg.prediction.iso_surface_level,
                                         gradient_threshold=self.cfg.get('mc_thres', 0.1),
                                         sigma=self.cfg.prediction.gradient_sigma,
-                                        filter=True)
+                                        filter=use_gradient_filter,
+                                        gradient_direction=gradient_direction)
         if nocs_verts.shape[0] == 0:
-            nocs_verts = np.ones((1, 3), dtype=np.float32) * np.nan
-            faces = np.zeros((1, 3), dtype=np.int64)
+            # Fallback: tiny tetrahedron at NOCS center instead of NaN
+            c = np.array([0.5, 0.5, 0.5], dtype=np.float32)
+            eps = 1e-3
+            nocs_verts = np.array([
+                c + [eps, eps, eps],
+                c + [-eps, -eps, eps],
+                c + [-eps, eps, -eps],
+                c + [eps, -eps, -eps],
+            ], dtype=np.float32)
+            faces = np.array([
+                [0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]
+            ], dtype=np.int64)
+            is_fallback = True
+            print('[WARN] marching cubes returned empty mesh, using fallback tetrahedron')
+        else:
+            is_fallback = False
+
+        # Collapse shell to thin surface (for thin cloth like fan_cloth)
+        if not is_fallback and self.cfg.get('collapse_shell', False):
+            nocs_verts, faces = collapse_shell_to_surface(nocs_verts, faces)
 
         # reverts to original size and put it onto the table
         canon_verts = self.aabbNormalizer.inverse(nocs_verts)
 
-        # Downsample it to original vertex density
-        pruned_id, faces = mesh_downsampling(canon_verts, faces, voxel_size=0.005)
-        canon_verts = canon_verts[pruned_id]
-        nocs_verts = nocs_verts[pruned_id]
+        # Downsample it to original vertex density (skip for fallback tetrahedron)
+        if not is_fallback:
+            pruned_id, faces = mesh_downsampling(canon_verts, faces, voxel_size=0.005)
+            canon_verts = canon_verts[pruned_id]
+            nocs_verts = nocs_verts[pruned_id]
 
         # query the downsampled points
         surface_query_points = torch.from_numpy(nocs_verts.astype(np.float32)).view(1, -1, 3).to(
@@ -604,8 +629,13 @@ class ConvImplicitWNFPipeline(pl.LightningModule):
         obs_results = self.get_obs_pts(pointnet2_result, surface_query_points)  # TODO what's this?
 
         # scale mesh back to task space before downsampling
-        downsample_id, ds_f = mesh_downsampling(canon_verts, faces, voxel_size=voxel_size)
-        mesh_edges_ds = get_edges_from_tri(ds_f)
+        if not is_fallback:
+            downsample_id, ds_f = mesh_downsampling(canon_verts, faces, voxel_size=voxel_size)
+            mesh_edges_ds = get_edges_from_tri(ds_f)
+        else:
+            downsample_id = np.arange(len(canon_verts))
+            ds_f = faces
+            mesh_edges_ds = get_edges_from_tri(faces)
         nocs_verts = torch.tensor(nocs_verts, dtype=torch.float32, device=self.device)
         mesh_edges = get_edges_from_tri(faces)
 
@@ -652,6 +682,16 @@ class ConvImplicitWNFPipeline(pl.LightningModule):
 
         finetune_cfg.rest_edge_len = rest_edge_len
         finetune_cfg.rest_edge_margin = margin
+
+        # NaN/Inf guard: skip finetune if mesh coordinates are invalid
+        if torch.is_tensor(mesh_coord):
+            has_bad = torch.isnan(mesh_coord).any() or torch.isinf(mesh_coord).any()
+        else:
+            has_bad = np.isnan(mesh_coord).any() or np.isinf(mesh_coord).any()
+        if has_bad:
+            print('[WARN] mesh_coord contains NaN/Inf, skipping test-time finetune')
+            opt_per_iter = 1  # run once without optimization
+
         finetuner = TestTimeFinetuner(finetune_cfg)
         finetuner.register_new_state(batch.depth,
                                      batch.pos,
@@ -663,7 +703,7 @@ class ConvImplicitWNFPipeline(pl.LightningModule):
         ft_results_list = []
         losses = {}
         for opt_iter in range(opt_per_iter):
-            ft_results = finetuner.step(opt_iter, optimize=self.cfg.tt_finetune)
+            ft_results = finetuner.step(opt_iter, optimize=self.cfg.tt_finetune and not has_bad)
             for k, v in ft_results.items():
                 if 'loss' in k:
                     if k in losses:
@@ -823,8 +863,8 @@ class ConvImplicitWNFPipeline(pl.LightningModule):
             faces = results['faces']
 
             opt_warp_field = torch.tensor(results['opt_warp_field']).cuda()
-            chamfer_mesh_opt = chamfer_distance_my(gt_task_verts.unsqueeze(0),
-                                                   opt_warp_field.unsqueeze(0))
+            chamfer_mesh_opt, _ = chamfer_distance_my(gt_task_verts.unsqueeze(0),
+                                                      opt_warp_field.unsqueeze(0))
             chamfer_pc_opt = two_way_chamfer_vis(opt_warp_field, faces, batch.pos)
             chamfer_pc = two_way_chamfer_vis(pred_task_verts, faces, batch.pos)
 

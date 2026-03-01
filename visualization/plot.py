@@ -30,7 +30,7 @@ def pointcloud(T_chart_points: np.ndarray, downsample=5, colors=None, colorscale
             marker_dict['color'] = colors
         else:
             try:
-                a = [f"rgb({r}, {g}, {b})" for r, g, b in colors][::downsample]
+                a = [f"rgb({int(np.clip(r, 0, 1) * 255)}, {int(np.clip(g, 0, 1) * 255)}, {int(np.clip(b, 0, 1) * 255)})" for r, g, b in colors][::downsample]
                 marker_dict["color"] = a
             except:
                 marker_dict["color"] = colors[::downsample]

@@ -85,16 +85,23 @@ def run_task(args):
         save_weights_only=False,
         # every_n_epochs=1,
         save_on_train_epoch_end=True)
+    # Convert legacy trainer config for PL >= 1.7
+    trainer_kwargs = dict(cfg.trainer)
+    ckpt_path = trainer_kwargs.pop('resume_from_checkpoint', None)
+    if 'gpus' in trainer_kwargs:
+        gpus = trainer_kwargs.pop('gpus')
+        trainer_kwargs['accelerator'] = 'gpu'
+        trainer_kwargs['devices'] = gpus
     trainer = pl.Trainer(
         benchmark=True,
         callbacks=[checkpoint_callback],
-        checkpoint_callback=True,
+        enable_checkpointing=True,
         logger=logger,
         check_val_every_n_epoch=1,
         fast_dev_run=cfg.is_debug,
         max_epochs=cfg.max_epochs,
-        **cfg.trainer)
-    trainer.fit(model=model, datamodule=datamodule, ckpt_path=cfg.resume_from_checkpoint)
+        **trainer_kwargs)
+    trainer.fit(model=model, datamodule=datamodule, ckpt_path=ckpt_path)
 
 
 def main():

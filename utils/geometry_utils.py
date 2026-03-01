@@ -7,9 +7,6 @@ from scipy.spatial.ckdtree import cKDTree
 import igl
 import open3d as o3d
 
-from menpo3d.barycentric import barycentric_coordinates_of_pointcloud, \
-    barycentric_coordinate_interpolation
-from menpo.shape.mesh.base import TriMesh, PointCloud
 from utils.camera_utils import intrinsic_from_fov, get_matrix_world_to_camera
 
 
@@ -92,6 +89,10 @@ def get_barycentric_pc(pc, coords, faces, ptr_attrs):
     Returns:
 
     """
+    from menpo3d.barycentric import barycentric_coordinates_of_pointcloud, \
+        barycentric_coordinate_interpolation
+    from menpo.shape.mesh.base import TriMesh, PointCloud
+
     PC = PointCloud(pc)
     mesh = TriMesh(coords, trilist=faces)
     bc, proj_face_ind = barycentric_coordinates_of_pointcloud(mesh, PC)
@@ -111,8 +112,8 @@ def get_world_coords(rgb, depth, matrix_world_to_camera=None, env=None):
     fx = K[0, 0]
     fy = K[1, 1]
 
-    x = np.linspace(0, width - 1, width).astype(np.float)
-    y = np.linspace(0, height - 1, height).astype(np.float)
+    x = np.linspace(0, width - 1, width).astype(np.float64)
+    y = np.linspace(0, height - 1, height).astype(np.float64)
     u, v = np.meshgrid(x, y)
     one = np.ones((height, width, 1))
     x = (u - u0) * depth / fx
@@ -136,7 +137,7 @@ def get_edges_from_tri(fs):
         mesh_edges.add(tuple(sorted((f[0], f[1]))))
         mesh_edges.add(tuple(sorted((f[0], f[2]))))
         mesh_edges.add(tuple(sorted((f[1], f[2]))))
-    mesh_edges = np.stack(list(mesh_edges), 0).astype(np.long)
+    mesh_edges = np.stack(list(mesh_edges), 0).astype(np.int64)
     return mesh_edges
 
 

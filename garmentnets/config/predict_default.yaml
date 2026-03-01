@@ -43,8 +43,9 @@ prediction:
   volume_size: 128
   gradient_sigma: 0.5
   iso_surface_level: 0.5
-  # descent for TSDF and DF
+  # descent for TSDF and DF (and UDF)
   gradient_direction: ascent
+  use_gradient_filter: True
   use_hole_prediction: False
 logger:
   mode: offline

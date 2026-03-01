@@ -122,6 +122,12 @@ class ConvImplicitWNFDataset(Dataset):
     def __len__(self):
         return self.length
 
+    def len(self):
+        return self.length
+
+    def get(self, idx: int):
+        return self.__getitem__(idx)
+
     def data_io(self, idx: int) -> dict:
         """
         read dataset from disk
@@ -157,15 +163,15 @@ class ConvImplicitWNFDataset(Dataset):
 
         data.update(nocs_data)
         if self.input_type == 'depth':
-            data['depth'] = torch.tensor(data['depth']).unsqueeze(0)
-            data['img_nocs'] = torch.tensor(data['img_nocs']).permute(2, 0, 1)
-            data['img_pc'] = torch.tensor(data['img_pc']).permute(2, 0, 1)
+            data['depth'] = torch.from_numpy(np.ascontiguousarray(data['depth'])).unsqueeze(0)
+            data['img_nocs'] = torch.from_numpy(np.ascontiguousarray(data['img_nocs'])).permute(2, 0, 1)
+            data['img_pc'] = torch.from_numpy(np.ascontiguousarray(data['img_pc'])).permute(2, 0, 1)
         else:
             data.pop('img_nocs')
             data.pop('img_pc')
 
         if 'rgb' in data:
-            data['rgb'] = torch.tensor(data['rgb']).permute(2, 0, 1)
+            data['rgb'] = torch.from_numpy(np.ascontiguousarray(data['rgb'])).permute(2, 0, 1)
         else:
             data['rgb'] = None
         # volume io
@@ -520,48 +526,51 @@ class ConvImplicitWNFDataModule(pl.LightningDataModule):
         kwargs = self.kwargs
         batch_size = kwargs['batch_size']
         num_workers = self.cfg.num_workers
-        prefetch_factor = 5 if num_workers > 0 else 2
         collate_func = my_collate if self.cfg.input_type != 'pc' else None
-        dataloader = self.dl_cls(self.train_dataset,
-                                 batch_size=batch_size,
-                                 shuffle=True,
-                                 num_workers=num_workers,
-                                 prefetch_factor=prefetch_factor,
-                                 collate_fn=collate_func,
-                                 follow_batch=self.follow_batch
-                                 )
+        dl_kwargs = dict(
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=num_workers,
+            collate_fn=collate_func,
+            follow_batch=self.follow_batch
+        )
+        if num_workers > 0:
+            dl_kwargs['prefetch_factor'] = 5
+        dataloader = self.dl_cls(self.train_dataset, **dl_kwargs)
         return dataloader
 
     def val_dataloader(self):
         kwargs = self.kwargs
         batch_size = kwargs['batch_size']
         num_workers = self.cfg.num_workers
-        prefetch_factor = 5 if num_workers > 0 else 2
         collate_func = my_collate if self.cfg.input_type != 'pc' else None
-        dataloader = self.dl_cls(self.val_dataset,
-                                 batch_size=batch_size,
-                                 shuffle=False,
-                                 num_workers=num_workers,
-                                 prefetch_factor=prefetch_factor,
-                                 collate_fn=collate_func,
-                                 follow_batch=self.follow_batch
-                                 )
+        dl_kwargs = dict(
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            collate_fn=collate_func,
+            follow_batch=self.follow_batch
+        )
+        if num_workers > 0:
+            dl_kwargs['prefetch_factor'] = 5
+        dataloader = self.dl_cls(self.val_dataset, **dl_kwargs)
         return dataloader
 
     def test_dataloader(self):
         kwargs = self.kwargs
         batch_size = kwargs['batch_size']
         num_workers = self.cfg.num_workers
-        prefetch_factor = 5 if num_workers > 0 else 2
         collate_func = my_collate if self.cfg.input_type != 'pc' else None
-        dataloader = self.dl_cls(self.test_dataset,
-                                 batch_size=batch_size,
-                                 shuffle=False,
-                                 num_workers=num_workers,
-                                 prefetch_factor=prefetch_factor,
-                                 collate_fn=collate_func,
-                                 follow_batch=self.follow_batch
-                                 )
+        dl_kwargs = dict(
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            collate_fn=collate_func,
+            follow_batch=self.follow_batch
+        )
+        if num_workers > 0:
+            dl_kwargs['prefetch_factor'] = 5
+        dataloader = self.dl_cls(self.test_dataset, **dl_kwargs)
         return dataloader
 
 

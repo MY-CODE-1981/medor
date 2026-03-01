@@ -67,6 +67,12 @@ def get_default_args():
     parser.add_argument("--table_w", type=float, default=10.,
                         help="Weight for table loss (prevent penetration)")
     parser.add_argument('--use_wandb', type=bool, default=False, help='Use weight and bias for logging')
+    parser.add_argument('--collapse_shell', default=False, action="store_true",
+                        help='Collapse MC shell mesh to thin surface (for thin cloth)')
+    parser.add_argument('--traj_first', default=False, action="store_true",
+                        help='Evaluate only the first frame of each trajectory (stride=85)')
+    parser.add_argument('--frames_per_traj', type=int, default=85,
+                        help='Number of frames per trajectory (used with --traj_first)')
 
     args = parser.parse_args()
     return args.__dict__
@@ -136,21 +142,52 @@ def run_task(args):
 
     print('Current working directory is ', os.getcwd())
     torch.manual_seed(1234)
+    all_metrics = []
+    # Build list of sample indices to evaluate
+    if cfg.get('traj_first', False):
+        frames_per_traj = cfg.get('frames_per_traj', 85)
+        total_samples = len(data_loader.dataset)
+        eval_indices = list(range(0, total_samples, frames_per_traj))
+        if cfg.max_test_num < len(eval_indices):
+            eval_indices = eval_indices[:cfg.max_test_num + 1]
+        print(f'[traj_first] Evaluating {len(eval_indices)} trajectories '
+              f'(first frame of each, stride={frames_per_traj})')
+    else:
+        eval_indices = None
+
+    eval_count = 0
     for batch_idx, batch in enumerate(data_loader):
+        # Skip samples not in eval_indices when traj_first is enabled
+        if eval_indices is not None and batch_idx not in eval_indices:
+            continue
         batch = batch.to('cuda')
-        results = pipeline_model.predict_mesh(batch,
-                                              finetune_cfg=finetune_cfg,
-                                              make_gif=cfg.make_opt_gif,
-                                              parallel=joblib_parallel,
-                                              )[0]
-        metrics = pipeline_model.eval_metrics(batch, results, self_log=False)
-        metrics['3d_plot'].write_html(f'{cfg.log_dir}/{batch_idx}_vis.html')
-        if cfg.make_opt_gif:
-            save_numpy_as_gif(np.array(results['optimization_gif']),
-                              f'{cfg.log_dir}/opt_{batch_idx}.gif',
-                              fps=10, add_index_rate=-1)
-        if batch_idx > cfg.max_test_num:
+        try:
+            results = pipeline_model.predict_mesh(batch,
+                                                  finetune_cfg=finetune_cfg,
+                                                  make_gif=cfg.make_opt_gif,
+                                                  parallel=joblib_parallel,
+                                                  )[0]
+            metrics = pipeline_model.eval_metrics(batch, results, self_log=False)
+            if '3d_plot' in metrics and metrics['3d_plot'] is not None:
+                metrics['3d_plot'].write_html(f'{cfg.log_dir}/{eval_count}_vis.html')
+            if cfg.make_opt_gif:
+                save_numpy_as_gif(np.array(results['optimization_gif']),
+                                  f'{cfg.log_dir}/opt_{eval_count}.gif',
+                                  fps=10, add_index_rate=-1)
+            print(f'[{eval_count}] (sample {batch_idx}) chamfer_mesh={metrics.get("test/chamfer_mesh", "N/A")}, '
+                  f'chamfer_pc={metrics.get("test/chamfer_pc", "N/A")}')
+            all_metrics.append(metrics)
+        except Exception as e:
+            print(f'[{eval_count}] (sample {batch_idx}) ERROR: {e}')
+        eval_count += 1
+        if eval_indices is None and batch_idx > cfg.max_test_num:
             break
+    # Print summary
+    if all_metrics:
+        for key in ['test/chamfer_mesh', 'test/chamfer_pc', 'test/chamfer_mesh_opt', 'test/chamfer_pc_opt']:
+            vals = [float(m[key]) for m in all_metrics if key in m and m[key] is not None]
+            if vals:
+                print(f'{key}: mean={np.mean(vals):.4f}, std={np.std(vals):.4f}')
 
 
 def main():

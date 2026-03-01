@@ -1,0 +1,19 @@
+# 1. データ変換
+  python scripts/convert_fan_dataset.py
+
+  # 2. Canonicalization学習 (500 epochs)
+  python garmentnets/train_pointnet2.py \
+    --exp_name fan_canon_v2 --log_dir data/release/fan_release \
+    --ds fan_cloth_v2 --cloth_type fan_cloth --input_type depth
+
+  # 3. Pipeline学習 (300 epochs — yamlデフォルト変更済み)
+  python garmentnets/train_pipeline.py \
+    --exp_name fan_pipe_v2 --log_dir data/release/fan_release \
+    --ds fan_cloth_v2 --cloth_type fan_cloth \
+    --canon_checkpoint data/release/fan_release/fan_canon_v2 --input_type depth
+
+  # 4. 推論 (finetune付き)
+  python garmentnets/eval_pipeline.py \
+    --model_path data/release/fan_release/fan_pipe_v2 \
+    --cloth_type fan_cloth --exp_name fan_eval_v2 \
+    --log_dir data/release/fan_release --max_test_num 10 --tt_finetune
